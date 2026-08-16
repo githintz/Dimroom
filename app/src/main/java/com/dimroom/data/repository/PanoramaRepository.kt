@@ -56,8 +56,9 @@ class PanoramaRepository @Inject constructor(
             // Naming the frame that failed turns an unhelpful "stitching failed" into something the
             // user can act on: reorder the selection, or leave that photo out.
             is PanoramaStitcher.Result.NoOverlap -> return@withContext PanoramaOutcome.Failure(
-                "Photo ${result.failedPair + 1} does not overlap the one before it. " +
-                    "Select the photos in sweep order, with each overlapping its neighbour.",
+                "Could not line up photo ${result.failedPair + 1} with the one before it. " +
+                    "Check they are in sweep order and overlap by about a third. Very plain " +
+                    "surfaces give the matcher little to lock onto — more overlap helps there.",
             )
 
             is PanoramaStitcher.Result.Success -> result

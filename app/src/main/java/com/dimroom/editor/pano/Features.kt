@@ -61,12 +61,46 @@ object FeatureDetector {
     private val PATTERN: IntArray = buildPattern()
 
     /**
-     * Detects up to [maxFeatures] corners, keeping the strongest spread across the frame.
+     * Thresholds tried in turn until enough corners are found.
      *
-     * [threshold] is the intensity difference a ring pixel must clear; lower finds more on flat
-     * scenes at the cost of noise matches.
+     * A fixed threshold cannot work across real photographs. FAST needs [ARC_LENGTH] consecutive
+     * ring pixels to *all* clear the threshold, and ordinary photographic surfaces — a painted
+     * wall, tarmac, fabric — carry a local three-pixel contrast of only a few levels. Measured on
+     * photo-like content, a threshold of 20 finds single-digit corners where 8 finds over a
+     * thousand; on hard-edged synthetic shapes both find plenty, which is exactly how a fixed
+     * threshold passes a synthetic test and then fails on every real photo.
+     *
+     * Descending stops at the first threshold that yields enough, so a well-textured frame still
+     * gets the stricter, cheaper pass.
      */
-    fun detect(image: GrayImage, maxFeatures: Int = 1200, threshold: Int = 20): List<Feature> {
+    private val THRESHOLD_LADDER = intArrayOf(24, 16, 10, 6, 4)
+
+    /**
+     * Detects up to [maxFeatures] corners, lowering the detection threshold until at least
+     * [targetFeatures] are found.
+     *
+     * Returns the largest set any threshold produced, so a genuinely featureless frame yields
+     * whatever little there is rather than nothing.
+     */
+    fun detect(
+        image: GrayImage,
+        maxFeatures: Int = 1200,
+        targetFeatures: Int = 400,
+    ): List<Feature> {
+        var best: List<Feature> = emptyList()
+        for (threshold in THRESHOLD_LADDER) {
+            val found = detectAt(image, maxFeatures, threshold)
+            if (found.size > best.size) best = found
+            if (found.size >= targetFeatures) return found
+        }
+        return best
+    }
+
+    /**
+     * Single detection pass at a fixed [threshold], the intensity difference a ring pixel must
+     * clear. Exposed for measuring sensitivity; [detect] is what callers normally want.
+     */
+    fun detectAt(image: GrayImage, maxFeatures: Int = 1200, threshold: Int = 20): List<Feature> {
         val candidates = ArrayList<Feature>()
         val margin = PATCH_RADIUS + 1
 

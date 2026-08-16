@@ -14,6 +14,36 @@ import kotlin.random.Random
 class FeaturePipelineTest {
 
     @Test
+    fun `finds corners on photographic content, not just hard-edged shapes`() {
+        // The failure this guards against: a fixed threshold tuned on synthetic rectangles finds
+        // almost nothing on a real photograph, because ordinary surfaces carry only a few levels of
+        // local contrast. Rectangles pass either way, so only smooth content catches it.
+        val photo = photographic(detail = 12f)
+
+        val strict = FeatureDetector.detectAt(photo, threshold = 20).size
+        val adaptive = FeatureDetector.detect(photo).size
+
+        assertTrue("Fixed threshold should struggle here, found $strict", strict < 50)
+        assertTrue("Adaptive detection found only $adaptive on photo-like content", adaptive > 200)
+    }
+
+    @Test
+    fun `recovers a translation on photographic content`() {
+        val photo = photographic(detail = 12f)
+        val shifted = translate(photo, dx = 21, dy = -8)
+
+        val matches = SimilarityEstimator.match(
+            FeatureDetector.detect(photo),
+            FeatureDetector.detect(shifted),
+        )
+        val result = SimilarityEstimator.estimate(matches)
+
+        assertNotNull("No transform from ${matches.size} matches on photo-like content", result)
+        assertEquals(21f, result!!.transform.tx, 1.5f)
+        assertEquals(-8f, result.transform.ty, 1.5f)
+    }
+
+    @Test
     fun `detects corners on textured content and none on a flat field`() {
         val textured = FeatureDetector.detect(scene())
         val flat = FeatureDetector.detect(
@@ -69,6 +99,23 @@ class FeaturePipelineTest {
 
         val confident = result != null && result.inliers >= 12 && result.inlierRatio > 0.5f
         assertTrue("Unrelated frames were matched confidently: $result", !confident)
+    }
+
+    /**
+     * Smooth gradients plus fine grain, which is what a photograph of an ordinary surface looks
+     * like to a corner detector — quite unlike hard-edged synthetic shapes.
+     */
+    private fun photographic(detail: Float, width: Int = 400, height: Int = 300): GrayImage {
+        val random = Random(seed = 3)
+        val pixels = IntArray(width * height)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val smooth = 120.0 + 60.0 * kotlin.math.sin(x / 90.0) * kotlin.math.cos(y / 70.0)
+                val grain = (random.nextFloat() - 0.5f) * detail
+                pixels[y * width + x] = (smooth + grain).toInt().coerceIn(0, 255)
+            }
+        }
+        return GrayImage(width, height, pixels)
     }
 
     /** Distinctive random-rectangle texture: plenty of corners, little repetition. */

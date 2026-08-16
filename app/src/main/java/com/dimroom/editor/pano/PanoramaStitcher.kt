@@ -97,7 +97,10 @@ class PanoramaStitcher @Inject constructor(
                 // Estimate the transform taking frame index+1 into frame index.
                 val matches = SimilarityEstimator.match(featureSets[index + 1], featureSets[index])
                 val estimate = SimilarityEstimator.estimate(matches)
-                if (estimate == null || estimate.inliers < MIN_INLIERS) {
+                if (estimate == null ||
+                    estimate.inliers < MIN_INLIERS ||
+                    estimate.inlierRatio < MIN_INLIER_RATIO
+                ) {
                     return@withContext Result.NoOverlap(index + 1)
                 }
                 pairwise.add(estimate.transform)
@@ -332,8 +335,17 @@ class PanoramaStitcher @Inject constructor(
         const val MIN_FRAMES = 2
         const val MAX_FRAMES = 12
 
-        /** Below this many agreeing correspondences a pair is treated as not overlapping. */
-        private const val MIN_INLIERS = 15
+        /**
+         * Agreement required to call a pair overlapping.
+         *
+         * Both numbers are set from measurement rather than intuition. On simulated pans, a genuine
+         * overlap of low-texture content yields as few as 14 agreeing correspondences but at a very
+         * high ratio, while a non-overlapping pair produces only a handful of raw matches and no fit
+         * at all. The count is therefore generous and the ratio does the discriminating; an earlier
+         * count of 15 rejected real overlaps for no safety benefit.
+         */
+        private const val MIN_INLIERS = 8
+        private const val MIN_INLIER_RATIO = 0.3f
 
         private const val FRAME_HEAP_FRACTION = 0.18
         private const val CANVAS_HEAP_FRACTION = 0.40
