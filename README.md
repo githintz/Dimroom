@@ -91,9 +91,16 @@ handle with no special cases.
 
 **Alignment.** Handheld brackets are never pixel-aligned. `MtbAligner` implements Ward's Median
 Threshold Bitmap: each frame is thresholded at its own median, which makes the comparison nearly
-immune to the exposure differences that define a bracket, then matched over a pyramid. It corrects
-translation only — rotation and parallax are out of scope, so a badly swung handheld set can still
-ghost. It can be switched off for tripod brackets.
+immune to the exposure differences that define a bracket, then matched over a pyramid — one wide
+search at the coarsest level, refined by a pixel at each finer one. It corrects translation only —
+rotation and parallax are out of scope, so a badly swung handheld set can still ghost. It can be
+switched off for tripod brackets.
+
+**A note on the weights.** The quality terms are floored individually before being multiplied, not
+after. A monochrome bracket has a saturation term of exactly zero in every frame, and a bare product
+would collapse to a constant, normalise to an even split, and quietly turn fusion into a plain
+average — precisely the case where it still needs to rank frames by contrast and exposure. There is
+a unit test for this.
 
 **Memory.** Fusion holds, per frame, an RGB float buffer and a weight map, plus a result pyramid and
 the pyramids of the frame currently being folded in. `HdrMerger` derives its working resolution from

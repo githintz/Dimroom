@@ -48,7 +48,9 @@ class MtbAlignerTest {
     }
 
     @Test
-    fun `recovers shifts larger than one pyramid step`() {
+    fun `recovers shifts far beyond a single pyramid step`() {
+        // Well past what the finest levels can nudge, so this only succeeds if the coarse search
+        // finds the shift and every finer level refines it correctly.
         val reference = texture(width = 256, height = 256)
         val shifted = shift(reference, dx = 21, dy = -17)
 

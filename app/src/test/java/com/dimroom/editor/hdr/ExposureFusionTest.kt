@@ -55,39 +55,87 @@ class ExposureFusionTest {
     }
 
     @Test
-    fun `fusion recovers detail that each single exposure loses`() {
-        // A scene whose left half is very dark and right half very bright. The dark frame blows out
-        // the right, the bright frame crushes the left; only the fusion should hold both.
+    fun `fusion holds detail in both halves that no single exposure holds`() {
+        // A scene whose left half sits deep in shadow and right half near clipping. The long
+        // exposure blows out the right, the short one crushes the left.
         val width = 48
-        val height = 32
+        val scene = brackedScene(width = width, monochrome = false)
+        val dark = expose(scene, 0.35f)
+        val bright = expose(scene, 3.5f)
+
+        val fused = ExposureFusion.fuse(listOf(dark, bright))
+
+        val darkShadows = localContrast(dark, 0, width / 2)
+        val brightShadows = localContrast(bright, 0, width / 2)
+        val darkHighlights = localContrast(dark, width / 2, width)
+        val brightHighlights = localContrast(bright, width / 2, width)
+
+        // Precondition: neither single frame holds both ends of the scene.
+        assertTrue("Test scene does not crush shadows", darkShadows < brightShadows / 4f)
+        assertTrue("Test scene does not clip highlights", brightHighlights < darkHighlights / 4f)
+
+        // Fusion selects the better-exposed frame per region; it does not invent contrast beyond
+        // what that frame recorded, so the bar is "keeps most of it", not "exceeds it".
+        val fusedShadows = localContrast(fused, 0, width / 2)
+        val fusedHighlights = localContrast(fused, width / 2, width)
+        assertTrue(
+            "Shadow detail lost: fused $fusedShadows vs best single frame $brightShadows",
+            fusedShadows > brightShadows * 0.5f,
+        )
+        assertTrue(
+            "Highlight detail lost: fused $fusedHighlights vs best single frame $darkHighlights",
+            fusedHighlights > darkHighlights * 0.5f,
+        )
+    }
+
+    @Test
+    fun `a monochrome bracket still fuses by contrast and exposure`() {
+        // Saturation is identically zero in every frame of a black-and-white bracket. A weight that
+        // multiplied the raw terms would collapse to a constant, normalise to an even split, and
+        // silently degrade fusion into a plain average.
+        val width = 48
+        val scene = brackedScene(width = width, monochrome = true)
+        val dark = expose(scene, 0.35f)
+        val bright = expose(scene, 3.5f)
+
+        val fused = ExposureFusion.fuse(listOf(dark, bright))
+
+        val fusedShadows = localContrast(fused, 0, width / 2)
+        val brightShadows = localContrast(bright, 0, width / 2)
+        val average = localContrast(averageOf(dark, bright), 0, width / 2)
+
+        assertTrue(
+            "Monochrome shadows lost: fused $fusedShadows vs well-exposed frame $brightShadows",
+            fusedShadows > brightShadows * 0.5f,
+        )
+        assertTrue(
+            "Fusion is no better than a plain average: $fusedShadows vs $average",
+            fusedShadows > average * 1.2f,
+        )
+    }
+
+    /** High-contrast test scene: deep shadow on the left, near-clipping on the right. */
+    private fun brackedScene(width: Int, monochrome: Boolean, height: Int = 32): FloatImage {
         val scene = FloatImage(width, height, 3)
         for (y in 0 until height) {
             for (x in 0 until width) {
-                // Fine checkerboard detail so there is real contrast to preserve.
+                // Fine checkerboard so there is real local contrast to preserve or lose.
                 val detail = if ((x / 2 + y / 2) % 2 == 0) 1.15f else 0.85f
-                val base = if (x < width / 2) 0.06f else 0.9f
-                val value = (base * detail).coerceIn(0f, 1f)
-                for (c in 0 until 3) scene[x, y, c] = value
+                val base = if (x < width / 2) {
+                    if (monochrome) floatArrayOf(0.06f, 0.06f, 0.06f) else floatArrayOf(0.08f, 0.05f, 0.03f)
+                } else {
+                    if (monochrome) floatArrayOf(0.92f, 0.92f, 0.92f) else floatArrayOf(0.95f, 0.88f, 0.80f)
+                }
+                for (c in 0 until 3) scene[x, y, c] = (base[c] * detail).coerceIn(0f, 1f)
             }
         }
+        return scene
+    }
 
-        val dark = expose(scene, 0.35f)
-        val bright = expose(scene, 3.5f)
-        val fused = ExposureFusion.fuse(listOf(dark, bright))
-
-        val darkSideContrast = localContrast(fused, 0, width / 2)
-        val brightSideContrast = localContrast(fused, width / 2, width)
-
-        // The bright frame has clipped the right half to flat white; the dark frame has crushed the
-        // left half to near black. The fused image should keep measurable structure in both.
-        assertTrue(
-            "Shadow detail lost: contrast $darkSideContrast",
-            darkSideContrast > localContrast(bright, 0, width / 2),
-        )
-        assertTrue(
-            "Highlight detail lost: contrast $brightSideContrast",
-            brightSideContrast > localContrast(dark, width / 2, width),
-        )
+    private fun averageOf(first: FloatImage, second: FloatImage): FloatImage {
+        val out = FloatImage(first.width, first.height, first.channels)
+        for (i in out.data.indices) out.data[i] = (first.data[i] + second.data[i]) / 2f
+        return out
     }
 
     @Test

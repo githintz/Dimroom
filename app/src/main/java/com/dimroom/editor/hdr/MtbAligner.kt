@@ -32,10 +32,13 @@ object MtbAligner {
     }
 
     /**
-     * Finds the shift that best maps [target] onto [reference].
+     * Finds the shift that best maps [target] onto [reference], returning the offset to apply to
+     * [target].
      *
-     * [maxShiftBits] bounds the search: each bit doubles the reach, so 6 covers roughly +/-64 px.
-     * Returns the offset to apply to [target].
+     * [maxShiftBits] bounds how deep the pyramid goes, but the image size bounds it too: halving
+     * stops once a level would fall below a usable size. Reach is therefore roughly
+     * `4 * 2^levels`, where `levels` is whichever of the two limits binds first — about +/-64 px on
+     * a 256 px image and considerably more on a full-resolution frame.
      */
     fun align(reference: GrayImage, target: GrayImage, maxShiftBits: Int = 6): Offset {
         require(reference.width == target.width && reference.height == target.height) {
@@ -46,12 +49,15 @@ object MtbAligner {
     }
 
     private fun alignRecursive(reference: GrayImage, target: GrayImage, level: Int): Offset {
-        // Recurse first: solving the coarse image gives a starting point that the fine level only
-        // has to refine by a pixel, which is what keeps the search to nine candidates per level.
+        // Recurse first: solving the coarse image gives a starting point the finer level only has
+        // to nudge by a pixel. The bottom of the recursion has no such hint, so it searches a wider
+        // radius — that one wide search is what sets how far a shift can be recovered at all.
         var current = Offset(0, 0)
+        var radius = COARSE_SEARCH_RADIUS
         if (level > 0 && reference.width > MIN_SIZE && reference.height > MIN_SIZE) {
             val coarse = alignRecursive(halve(reference), halve(target), level - 1)
             current = Offset(coarse.dx * 2, coarse.dy * 2)
+            radius = REFINE_SEARCH_RADIUS
         }
 
         val referenceBitmap = thresholdAtMedian(reference)
@@ -59,8 +65,8 @@ object MtbAligner {
 
         var best = current
         var bestError = Int.MAX_VALUE
-        for (dy in -1..1) {
-            for (dx in -1..1) {
+        for (dy in -radius..radius) {
+            for (dx in -radius..radius) {
                 val candidate = Offset(current.dx + dx, current.dy + dy)
                 val error = disagreement(referenceBitmap, targetBitmap, candidate)
                 if (error < bestError) {
@@ -149,5 +155,15 @@ object MtbAligner {
         val usable: BooleanArray,
     )
 
-    private const val MIN_SIZE = 32
+    /**
+     * Floor on the coarsest pyramid level. Below roughly this size the median threshold stops
+     * describing anything structural and the match becomes a coin toss.
+     */
+    private const val MIN_SIZE = 16
+
+    /** Radius of the one unguided search, at the bottom of the recursion. */
+    private const val COARSE_SEARCH_RADIUS = 4
+
+    /** Every finer level only refines what the level below already found. */
+    private const val REFINE_SEARCH_RADIUS = 1
 }

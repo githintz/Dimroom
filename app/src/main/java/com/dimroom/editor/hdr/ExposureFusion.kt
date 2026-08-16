@@ -121,13 +121,23 @@ object ExposureFusion {
                     wellExposed(g, exposureDenominator) *
                     wellExposed(b, exposureDenominator)
 
+                // Each term gets a small floor *before* multiplication rather than the product
+                // getting one after. A monochrome bracket has saturation of exactly zero in every
+                // frame, so a bare product would collapse to a constant, normalise to an even
+                // split, and quietly turn fusion into a plain average — the one case where it must
+                // still rank frames by contrast and exposure.
                 var weight = 1f
-                if (params.contrastPower != 0f) weight *= contrast.pow(params.contrastPower)
-                if (params.saturationPower != 0f) weight *= saturation.pow(params.saturationPower)
-                if (params.exposurePower != 0f) weight *= exposedness.pow(params.exposurePower)
+                if (params.contrastPower != 0f) {
+                    weight *= (contrast + TERM_FLOOR).pow(params.contrastPower)
+                }
+                if (params.saturationPower != 0f) {
+                    weight *= (saturation + TERM_FLOOR).pow(params.saturationPower)
+                }
+                if (params.exposurePower != 0f) {
+                    weight *= (exposedness + TERM_FLOOR).pow(params.exposurePower)
+                }
 
-                // Keep every frame marginally in play so flat regions still get a defined blend.
-                map.data[y * image.width + x] = weight + EPSILON
+                map.data[y * image.width + x] = weight
             }
         }
         return map
@@ -152,5 +162,13 @@ object ExposureFusion {
             0.114f * image.clamped(x, y, 2)
 
     private const val RGB = 3
+
+    /**
+     * Floor added to each quality term. Small enough to be noise against a real term (typical
+     * saturation is ~0.07), large enough that a term which is identically zero across the whole
+     * bracket cancels in normalisation instead of erasing the other terms.
+     */
+    private const val TERM_FLOOR = 1e-3f
+
     private const val EPSILON = 1e-12f
 }
