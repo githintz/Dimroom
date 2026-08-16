@@ -127,6 +127,7 @@ fun SettingsScreen(
  * Storage backends. Cloud rows are visible but inert on purpose: the interface they will implement
  * already exists, only the implementations are outstanding.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StorageSection(state: SettingsUiState) {
     SectionHeader("Storage")

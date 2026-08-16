@@ -74,7 +74,7 @@ class EditorViewModel @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
-    private val photoId: String = checkNotNull(savedStateHandle["photoId"]) {
+    private val photoId: String = checkNotNull(savedStateHandle.get<String>("photoId")) {
         "EditorViewModel requires a photoId argument"
     }
 

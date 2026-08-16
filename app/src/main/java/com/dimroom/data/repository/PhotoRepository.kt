@@ -298,6 +298,7 @@ private fun SortOrder.comparator(): Comparator<Photo> = when (this) {
     SortOrder.DATE_ADDED_ASC -> compareBy<Photo> { it.dateAddedMs }
     SortOrder.DATE_TAKEN_DESC -> compareByDescending<Photo> { it.dateTakenMs }
     SortOrder.DATE_TAKEN_ASC -> compareBy<Photo> { it.dateTakenMs }
-    SortOrder.NAME_ASC -> compareBy<Photo>(String.CASE_INSENSITIVE_ORDER) { it.displayName }
-    SortOrder.NAME_DESC -> compareBy<Photo>(String.CASE_INSENSITIVE_ORDER) { it.displayName }.reversed()
+    SortOrder.NAME_ASC -> compareBy<Photo, String>(String.CASE_INSENSITIVE_ORDER) { it.displayName }
+    SortOrder.NAME_DESC ->
+        compareBy<Photo, String>(String.CASE_INSENSITIVE_ORDER) { it.displayName }.reversed()
 }
