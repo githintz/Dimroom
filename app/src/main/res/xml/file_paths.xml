@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Rendered exports handed to the system share sheet. -->
+    <cache-path
+        name="shared_exports"
+        path="exports/" />
+</paths>
