@@ -65,11 +65,21 @@ fun EditorScreen(
 
     var showExportSheet by remember { mutableStateOf(false) }
     var showSavePresetDialog by remember { mutableStateOf(false) }
+    // Reported from the GL thread when the shader program cannot be built; snapshot state writes
+    // are safe across threads, and without this the failure would be a silently black canvas.
+    var canvasError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.message) {
         state.message?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.consumeMessage()
+        }
+    }
+
+    LaunchedEffect(canvasError) {
+        canvasError?.let {
+            snackbarHostState.showSnackbar(it)
+            canvasError = null
         }
     }
 
@@ -130,7 +140,7 @@ fun EditorScreen(
                     compareMode = state.compareMode,
                     splitFraction = state.splitFraction,
                     onSplitDrag = viewModel::setSplitFraction,
-                    onError = { /* surfaced through the snackbar via state.message */ },
+                    onError = { message -> canvasError = message },
                     modifier = Modifier.fillMaxSize(),
                 )
 
