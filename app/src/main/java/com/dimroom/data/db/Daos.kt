@@ -185,13 +185,13 @@ interface EditDao {
 }
 
 @Dao
-interface HdrDao {
+interface CompositeDao {
 
     @Upsert
-    suspend fun upsert(merge: HdrMergeEntity)
+    suspend fun upsert(composite: CompositeEntity)
 
-    @Query("SELECT * FROM hdr_merges WHERE mergedPhotoId = :photoId")
-    suspend fun findByPhotoId(photoId: String): HdrMergeEntity?
+    @Query("SELECT * FROM composites WHERE mergedPhotoId = :photoId")
+    suspend fun findByPhotoId(photoId: String): CompositeEntity?
 }
 
 @Dao

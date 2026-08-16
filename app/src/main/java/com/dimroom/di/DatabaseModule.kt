@@ -5,7 +5,7 @@ import androidx.room.Room
 import com.dimroom.data.db.AlbumDao
 import com.dimroom.data.db.DimroomDatabase
 import com.dimroom.data.db.EditDao
-import com.dimroom.data.db.HdrDao
+import com.dimroom.data.db.CompositeDao
 import com.dimroom.data.db.PhotoDao
 import com.dimroom.data.db.PresetDao
 import dagger.Module
@@ -23,7 +23,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): DimroomDatabase =
         Room.databaseBuilder(context, DimroomDatabase::class.java, DimroomDatabase.NAME)
-            .addMigrations(DimroomDatabase.MIGRATION_1_2)
+            .addMigrations(DimroomDatabase.MIGRATION_1_2, DimroomDatabase.MIGRATION_2_3)
             // Last-resort net for a version with no migration path. Room is a cache over the
             // on-disk library — originals and edit sidecars are the source of truth — so this
             // costs album membership and HDR grouping at worst, never photos.
@@ -31,7 +31,7 @@ object DatabaseModule {
             .build()
 
     @Provides
-    fun provideHdrDao(db: DimroomDatabase): HdrDao = db.hdrDao()
+    fun provideCompositeDao(db: DimroomDatabase): CompositeDao = db.compositeDao()
 
     @Provides
     fun providePhotoDao(db: DimroomDatabase): PhotoDao = db.photoDao()

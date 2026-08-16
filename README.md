@@ -134,6 +134,54 @@ bar; deleting a stack's primary releases its members rather than burying them. L
 is library metadata held in Room — it deliberately does not alter the storage layout, so the folder
 contract above is unchanged and a merged photo is just another file under `/Originals`.
 
+### Panorama stitching
+
+Select 2–12 overlapping photos **in sweep order** and stitch them into one frame.
+
+**Cylindrical projection first.** The obvious route is to chain a homography per pair, but eight
+degrees of freedom estimated from noisy matches accumulates drift that only bundle adjustment takes
+back out, and the result stretches badly past about 90° of sweep. Instead each frame is projected
+onto a cylinder around the camera's optical centre — focal length from EXIF
+`FocalLengthIn35mmFilm`, falling back to a typical phone lens — after which a horizontal sweep is
+very nearly pure translation. The model then collapses to a 4-DOF similarity (translation, roll,
+scale), which is far easier to estimate and far harder to get badly wrong.
+
+The cost is an assumption: the camera rotated about its optical centre and did not travel. That is
+what a hand-swept phone panorama approximates, and it is what this stitcher is for.
+
+**Pipeline.** FAST corners with an ORB-style oriented BRIEF descriptor → brute-force Hamming
+matching with a ratio test and a symmetry check → RANSAC similarity fit refined by least squares on
+the inliers → chain onto the middle frame → gain compensation → multi-band blend.
+
+Two details that matter:
+
+* **Only adjacent pairs are matched**, which is what makes selection order load-bearing and an
+  all-pairs search unnecessary. A pair that fails to match names the offending photo rather than
+  failing the whole stitch anonymously.
+* **Chaining anchors the middle frame**, not the first. With no bundle adjustment, drift grows along
+  the chain, so the shortest chain to any frame is what stops the ends bowing.
+
+**Blending** reuses `Pyramids` from exposure fusion — a per-band weighted sum is a per-band weighted
+sum, and only the weights differ. Weights are the distance to each frame's own edge, so seams land
+where both frames are weakest. Gain compensation equalises the exposure the camera metered
+separately per frame, clamped so a bad overlap estimate cannot do more damage than the difference it
+is correcting.
+
+**Known limits.** Translation, roll and scale only — no bundle adjustment, no lens-distortion model,
+no graph-cut seam finding, and no deghosting, so anything that moved between frames will ghost. A
+sweep that translates rather than pivots will not close. Output resolution is capped by a heap-derived
+canvas budget, as with HDR.
+
+The geometry and matching live in `CylindricalProjection`, `FeatureDetector`, `SimilarityEstimator`,
+`PanoramaCanvas` and `PanoramaBlender` — pure Kotlin with no Android types, so projection round
+trips, chaining, canvas fitting, descriptor matching and RANSAC against known transforms are all
+covered by JVM unit tests.
+
+**Shared machinery.** HDR and panorama differ entirely in how they produce pixels and not at all in
+what happens next, so `CompositeWriter` owns the common half: storage path, thumbnail, album
+inheritance and optional stacking. Provenance for both lives in one `composites` table rather than a
+table per feature.
+
 ---
 
 ## The storage abstraction
@@ -292,6 +340,9 @@ rename, delete and add/remove; long-press to multi-select.
 
 **HDR merge** — fuse 2–9 selected photos into one image, with optional alignment for handheld
 brackets; keep the originals separate or group them under the merge as a single tile.
+
+**Panorama** — stitch 2–12 overlapping photos, selected in sweep order, into one frame; same choice
+of keeping the originals separate or grouping them under the result.
 
 **Editor** — pinch-zoom and pan; before/after toggle and draggable split compare; Light, Color, HSL
 (8 bands), Effects and Crop panels; undo/redo and reset-to-original; edits autosave to Room and the

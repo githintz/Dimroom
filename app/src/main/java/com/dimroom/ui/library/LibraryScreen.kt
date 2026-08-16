@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.HdrOn
+import androidx.compose.material.icons.filled.Panorama
 import androidx.compose.material.icons.filled.LayersClear
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.MoreVert
@@ -87,6 +88,7 @@ fun LibraryScreen(
     var showAddToAlbumMenu by remember { mutableStateOf(false) }
     var albumDialog by remember { mutableStateOf<AlbumDialog?>(null) }
     var showHdrDialog by remember { mutableStateOf(false) }
+    var showPanoramaDialog by remember { mutableStateOf(false) }
 
     // The system photo picker needs no storage permission and returns per-item read grants.
     val pickPhotos = rememberLauncherForActivityResult(
@@ -120,9 +122,15 @@ fun LibraryScreen(
                         ) {
                             Icon(Icons.Filled.HdrOn, contentDescription = "Merge to HDR")
                         }
+                        IconButton(
+                            onClick = { showPanoramaDialog = true },
+                            enabled = state.canStitchSelection,
+                        ) {
+                            Icon(Icons.Filled.Panorama, contentDescription = "Stitch panorama")
+                        }
                         state.ungroupableStack?.let {
                             IconButton(onClick = viewModel::ungroupSelectedStack) {
-                                Icon(Icons.Filled.LayersClear, contentDescription = "Ungroup HDR")
+                                Icon(Icons.Filled.LayersClear, contentDescription = "Ungroup")
                             }
                         }
                         Box {
@@ -271,7 +279,7 @@ fun LibraryScreen(
 
             // Fusion takes real time on a big bracket, so report the actual stage and fraction
             // rather than an indefinite spinner.
-            state.hdrProgress?.let { progress ->
+            state.compositeProgress?.let { progress ->
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text(
                         text = "${progress.stage}…",
@@ -299,6 +307,17 @@ fun LibraryScreen(
                 )
             }
         }
+    }
+
+    if (showPanoramaDialog) {
+        PanoramaDialog(
+            photoCount = state.selection.size,
+            onDismiss = { showPanoramaDialog = false },
+            onConfirm = { name, mode ->
+                viewModel.stitchSelectionToPanorama(name, mode)
+                showPanoramaDialog = false
+            },
+        )
     }
 
     if (showHdrDialog) {
@@ -412,9 +431,9 @@ private fun PhotoGrid(
                 }
 
                 // A merged photo is labelled; a grouped one also says how many photos it stands for.
-                if (photo.kind == PhotoKind.HDR_MERGE || photo.isStack) {
+                badgeFor(photo)?.let { label ->
                     TileBadge(
-                        text = if (photo.isStack) "HDR ${photo.stackSize}" else "HDR",
+                        text = label,
                         modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
                     )
                 }
@@ -438,6 +457,21 @@ private fun PhotoGrid(
             }
         }
     }
+}
+
+/**
+ * Tile label for a composite, or null for an ordinary photo.
+ *
+ * A grouped tile also says how many photos it stands for, which is the only cue that there is
+ * anything tucked inside it.
+ */
+private fun badgeFor(photo: Photo): String? {
+    val kind = when (photo.kind) {
+        PhotoKind.HDR_MERGE -> "HDR"
+        PhotoKind.PANORAMA -> "PANO"
+        PhotoKind.ORIGINAL -> if (photo.isStack) "STACK" else return null
+    }
+    return if (photo.isStack) "$kind ${photo.stackSize}" else kind
 }
 
 /** Small dark pill used for tile annotations, legible over any photo. */

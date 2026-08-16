@@ -7,6 +7,9 @@ enum class PhotoKind {
 
     /** Produced by fusing a bracket of exposures. */
     HDR_MERGE,
+
+    /** Produced by stitching a sweep of overlapping frames. */
+    PANORAMA,
 }
 
 /** A photo in the local library. */
@@ -34,7 +37,7 @@ data class Photo(
 }
 
 /** What should happen to the source brackets once a merge finishes. */
-enum class HdrMergeMode(val displayName: String, val description: String) {
+enum class MergeMode(val displayName: String, val description: String) {
     SEPARATE(
         "Keep photos separate",
         "The merged HDR is added to your library alongside the originals, which stay exactly where they are.",
@@ -49,8 +52,18 @@ enum class HdrMergeMode(val displayName: String, val description: String) {
 data class HdrMergeRequest(
     val sourcePhotoIds: List<String>,
     val name: String,
-    val mode: HdrMergeMode,
+    val mode: MergeMode,
     val alignFrames: Boolean = true,
+)
+
+/**
+ * A panorama the user asked for. [sourcePhotoIds] are in sweep order — the stitcher only matches
+ * adjacent pairs, so the order the user selected them in is load-bearing.
+ */
+data class PanoramaRequest(
+    val sourcePhotoIds: List<String>,
+    val name: String,
+    val mode: MergeMode,
 )
 
 /** A user-created collection of photos. */

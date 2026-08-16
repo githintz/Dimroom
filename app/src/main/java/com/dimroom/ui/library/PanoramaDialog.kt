@@ -7,11 +7,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -22,7 +20,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
@@ -33,24 +30,23 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Confirms an HDR merge.
+ * Confirms a panorama stitch.
  *
- * The two outcomes differ in what happens to the brackets afterwards, not in the merge itself, so
- * the wording describes the library result rather than the algorithm.
+ * Says the one thing the user has to get right — selection order is sweep order — rather than
+ * leaving it to be discovered from a failure message.
  */
 @Composable
-fun HdrMergeDialog(
+fun PanoramaDialog(
     photoCount: Int,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, mode: MergeMode, alignFrames: Boolean) -> Unit,
+    onConfirm: (name: String, mode: MergeMode) -> Unit,
 ) {
-    var name by remember { mutableStateOf(defaultName()) }
+    var name by remember { mutableStateOf(defaultPanoramaName()) }
     var mode by remember { mutableStateOf(MergeMode.GROUPED) }
-    var alignFrames by remember { mutableStateOf(true) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Merge $photoCount photos to HDR") },
+        title = { Text("Stitch $photoCount photos") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -62,12 +58,20 @@ fun HdrMergeDialog(
                 )
 
                 Text(
+                    text = "Photos are stitched in the order you selected them, and each one needs " +
+                        "to overlap the one before it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+
+                Text(
                     text = "In your library",
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
                 )
                 MergeMode.entries.forEach { option ->
-                    ModeOption(
+                    PanoramaModeOption(
                         mode = option,
                         selected = option == mode,
                         photoCount = photoCount,
@@ -75,32 +79,9 @@ fun HdrMergeDialog(
                     )
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .toggleable(
-                            value = alignFrames,
-                            onValueChange = { alignFrames = it },
-                            role = Role.Checkbox,
-                        ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = alignFrames, onCheckedChange = null)
-                    Column(modifier = Modifier.padding(start = 8.dp)) {
-                        Text("Align frames", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            text = "Corrects small handheld shifts between shots. Turn off for " +
-                                "tripod brackets to merge a little faster.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
                 Text(
-                    text = "Your originals are never modified. The merge is added as a new, fully " +
-                        "editable photo.",
+                    text = "Your originals are never modified. The panorama is added as a new, " +
+                        "fully editable photo.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 12.dp),
@@ -108,11 +89,8 @@ fun HdrMergeDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { onConfirm(name, mode, alignFrames) },
-                enabled = name.isNotBlank(),
-            ) {
-                Text("Merge")
+            TextButton(onClick = { onConfirm(name, mode) }, enabled = name.isNotBlank()) {
+                Text("Stitch")
             }
         },
         dismissButton = {
@@ -122,7 +100,7 @@ fun HdrMergeDialog(
 }
 
 @Composable
-private fun ModeOption(
+private fun PanoramaModeOption(
     mode: MergeMode,
     selected: Boolean,
     photoCount: Int,
@@ -144,9 +122,14 @@ private fun ModeOption(
     ) {
         RadioButton(selected = selected, onClick = null)
         Column(modifier = Modifier.padding(start = 8.dp)) {
-            Text(mode.displayName, style = MaterialTheme.typography.bodyMedium)
             Text(
-                text = mode.description.replace("the originals", "the $photoCount originals"),
+                text = mode.displayName.replace("HDR", "panorama"),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = mode.description
+                    .replace("merged HDR", "panorama")
+                    .replace("the originals", "the $photoCount originals"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -154,5 +137,5 @@ private fun ModeOption(
     }
 }
 
-private fun defaultName(): String =
-    "HDR " + SimpleDateFormat("d MMM HH:mm", Locale.getDefault()).format(Date())
+private fun defaultPanoramaName(): String =
+    "Panorama " + SimpleDateFormat("d MMM HH:mm", Locale.getDefault()).format(Date())

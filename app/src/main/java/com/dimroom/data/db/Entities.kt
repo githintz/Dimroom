@@ -28,9 +28,15 @@ data class PhotoEntity(
     val isStackPrimary: Boolean = false,
 )
 
-/** Provenance for a merged photo. Grouping is library metadata, like albums — it never leaves Room. */
+/**
+ * Provenance for a photo built from several others, whatever built it.
+ *
+ * Kept generic rather than one table per feature: HDR and panorama record exactly the same facts,
+ * and a third compositing mode would otherwise mean a third near-identical table and migration.
+ * Like albums, this is library metadata that never leaves Room.
+ */
 @Entity(
-    tableName = "hdr_merges",
+    tableName = "composites",
     foreignKeys = [
         ForeignKey(
             entity = PhotoEntity::class,
@@ -40,11 +46,14 @@ data class PhotoEntity(
         ),
     ],
 )
-data class HdrMergeEntity(
+data class CompositeEntity(
     @PrimaryKey val mergedPhotoId: String,
-    /** Comma-separated source photo ids, oldest selection order first. */
+    /** What produced it, mirroring [PhotoEntity.kind]. */
+    val kind: PhotoKind,
+    /** Comma-separated source photo ids, in the order they were combined. */
     val sourcePhotoIds: String,
     val createdAtMs: Long,
+    /** Whether frame alignment was applied. Always true for a panorama. */
     val aligned: Boolean,
 )
 

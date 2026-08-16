@@ -13,9 +13,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AlbumPhotoCrossRef::class,
         EditStateEntity::class,
         PresetEntity::class,
-        HdrMergeEntity::class,
+        CompositeEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(DbConverters::class)
@@ -29,7 +29,7 @@ abstract class DimroomDatabase : RoomDatabase() {
 
     abstract fun presetDao(): PresetDao
 
-    abstract fun hdrDao(): HdrDao
+    abstract fun compositeDao(): CompositeDao
 
     companion object {
         const val NAME = "dimroom.db"
@@ -61,6 +61,41 @@ abstract class DimroomDatabase : RoomDatabase() {
                     )
                     """.trimIndent(),
                 )
+            }
+        }
+
+        /**
+         * Generalises HDR provenance into one composites table so panorama — and anything after it
+         * — records the same facts in the same place rather than growing a table per feature.
+         *
+         * Rebuild-and-copy rather than `ALTER TABLE ADD COLUMN`, because the new column has no
+         * sensible default: every row that already exists is an HDR merge and has to say so.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS composites (
+                        mergedPhotoId TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        sourcePhotoIds TEXT NOT NULL,
+                        createdAtMs INTEGER NOT NULL,
+                        aligned INTEGER NOT NULL,
+                        PRIMARY KEY(mergedPhotoId),
+                        FOREIGN KEY(mergedPhotoId) REFERENCES photos(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    INSERT OR IGNORE INTO composites
+                        (mergedPhotoId, kind, sourcePhotoIds, createdAtMs, aligned)
+                    SELECT mergedPhotoId, 'HDR_MERGE', sourcePhotoIds, createdAtMs, aligned
+                    FROM hdr_merges
+                    """.trimIndent(),
+                )
+                db.execSQL("DROP TABLE IF EXISTS hdr_merges")
             }
         }
     }

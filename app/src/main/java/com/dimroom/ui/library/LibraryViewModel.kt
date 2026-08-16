@@ -6,13 +6,17 @@ import androidx.lifecycle.viewModelScope
 import com.dimroom.data.repository.AlbumRepository
 import com.dimroom.data.repository.HdrMergeOutcome
 import com.dimroom.data.repository.HdrRepository
+import com.dimroom.data.repository.PanoramaOutcome
+import com.dimroom.data.repository.PanoramaRepository
 import com.dimroom.data.repository.PhotoRepository
 import com.dimroom.domain.model.Album
-import com.dimroom.domain.model.HdrMergeMode
+import com.dimroom.domain.model.MergeMode
 import com.dimroom.domain.model.HdrMergeRequest
+import com.dimroom.domain.model.PanoramaRequest
 import com.dimroom.domain.model.Photo
 import com.dimroom.domain.model.SortOrder
 import com.dimroom.editor.hdr.HdrMerger
+import com.dimroom.editor.pano.PanoramaStitcher
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,8 +30,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** Live state of a running merge, so the grid can show real progress rather than a spinner. */
-data class HdrMergeProgress(val fraction: Float, val stage: String)
+/** Live state of a running composite, so the grid shows real progress rather than a spinner. */
+data class CompositeProgress(val fraction: Float, val stage: String)
 
 data class LibraryUiState(
     val photos: List<Photo> = emptyList(),
@@ -36,7 +40,7 @@ data class LibraryUiState(
     val sortOrder: SortOrder = SortOrder.DATE_ADDED_DESC,
     val isImporting: Boolean = false,
     val selection: Set<String> = emptySet(),
-    val hdrProgress: HdrMergeProgress? = null,
+    val compositeProgress: CompositeProgress? = null,
     val message: String? = null,
 ) {
     val isSelecting: Boolean get() = selection.isNotEmpty()
@@ -46,8 +50,13 @@ data class LibraryUiState(
 
     /** Merging needs at least two frames, and the engine caps how many it will hold at once. */
     val canMergeSelection: Boolean
-        get() = hdrProgress == null &&
+        get() = compositeProgress == null &&
             selection.size in HdrMerger.MIN_FRAMES..HdrMerger.MAX_FRAMES
+
+    /** Stitching has its own, wider frame limit than merging. */
+    val canStitchSelection: Boolean
+        get() = compositeProgress == null &&
+            selection.size in PanoramaStitcher.MIN_FRAMES..PanoramaStitcher.MAX_FRAMES
 
     /** A single selected stack can be pulled apart again. */
     val ungroupableStack: Photo?
@@ -60,6 +69,7 @@ class LibraryViewModel @Inject constructor(
     private val photoRepository: PhotoRepository,
     private val albumRepository: AlbumRepository,
     private val hdrRepository: HdrRepository,
+    private val panoramaRepository: PanoramaRepository,
 ) : ViewModel() {
 
     private val filter = MutableStateFlow(LibraryFilter())
@@ -83,7 +93,7 @@ class LibraryViewModel @Inject constructor(
             isImporting = currentTransient.isImporting,
             // Drop selections for photos that no longer exist.
             selection = currentTransient.selection.intersect(photoList.map { it.id }.toSet()),
-            hdrProgress = currentTransient.hdrProgress,
+            compositeProgress = currentTransient.compositeProgress,
             message = currentTransient.message,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
@@ -185,12 +195,12 @@ class LibraryViewModel @Inject constructor(
      * The merge runs in [viewModelScope] so navigating within the app does not abandon it, and the
      * selection is only cleared once the work has actually finished.
      */
-    fun mergeSelectionToHdr(name: String, mode: HdrMergeMode, alignFrames: Boolean) {
+    fun mergeSelectionToHdr(name: String, mode: MergeMode, alignFrames: Boolean) {
         val ids = transient.value.selection.toList()
         if (ids.size < HdrMerger.MIN_FRAMES) return
 
         viewModelScope.launch {
-            transient.update { it.copy(hdrProgress = HdrMergeProgress(0f, "Preparing")) }
+            transient.update { it.copy(compositeProgress = CompositeProgress(0f, "Preparing")) }
             val outcome = hdrRepository.merge(
                 request = HdrMergeRequest(
                     sourcePhotoIds = ids,
@@ -199,24 +209,67 @@ class LibraryViewModel @Inject constructor(
                     alignFrames = alignFrames,
                 ),
                 listener = { fraction, stage ->
-                    transient.update { it.copy(hdrProgress = HdrMergeProgress(fraction, stage)) }
+                    transient.update { it.copy(compositeProgress = CompositeProgress(fraction, stage)) }
                 },
             )
             transient.update { current ->
                 when (outcome) {
                     is HdrMergeOutcome.Success -> current.copy(
-                        hdrProgress = null,
+                        compositeProgress = null,
                         selection = emptySet(),
                         message = describe(outcome),
                     )
 
                     is HdrMergeOutcome.Failure -> current.copy(
-                        hdrProgress = null,
+                        compositeProgress = null,
                         message = outcome.message,
                     )
                 }
             }
         }
+    }
+
+    /**
+     * Stitches the current selection into a panorama.
+     *
+     * Selection order is the sweep order the stitcher relies on, so it is passed through as the user
+     * built it rather than sorted.
+     */
+    fun stitchSelectionToPanorama(name: String, mode: MergeMode) {
+        val ids = transient.value.selection.toList()
+        if (ids.size < PanoramaStitcher.MIN_FRAMES) return
+
+        viewModelScope.launch {
+            transient.update { it.copy(compositeProgress = CompositeProgress(0f, "Preparing")) }
+            val outcome = panoramaRepository.stitch(
+                request = PanoramaRequest(sourcePhotoIds = ids, name = name, mode = mode),
+                listener = { fraction, stage ->
+                    transient.update { it.copy(compositeProgress = CompositeProgress(fraction, stage)) }
+                },
+            )
+            transient.update { current ->
+                when (outcome) {
+                    is PanoramaOutcome.Success -> current.copy(
+                        compositeProgress = null,
+                        selection = emptySet(),
+                        message = describe(outcome),
+                    )
+
+                    is PanoramaOutcome.Failure -> current.copy(
+                        compositeProgress = null,
+                        message = outcome.message,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun describe(outcome: PanoramaOutcome.Success): String {
+        val grouping = when (outcome.mode) {
+            MergeMode.GROUPED -> ", grouped as one"
+            MergeMode.SEPARATE -> ", originals kept separately"
+        }
+        return "Stitched ${outcome.sourceCount} photos into “${outcome.displayName}”" + grouping
     }
 
     fun ungroupSelectedStack() {
@@ -232,8 +285,8 @@ class LibraryViewModel @Inject constructor(
     private fun describe(outcome: HdrMergeOutcome.Success): String {
         val base = "Merged ${outcome.sourceCount} photos into “${outcome.displayName}”"
         val grouping = when (outcome.mode) {
-            HdrMergeMode.GROUPED -> ", grouped as one"
-            HdrMergeMode.SEPARATE -> ", originals kept separately"
+            MergeMode.GROUPED -> ", grouped as one"
+            MergeMode.SEPARATE -> ", originals kept separately"
         }
         val alignment = if (outcome.alignedFrames > 0) {
             " · realigned ${outcome.alignedFrames} frame${plural(outcome.alignedFrames)}"
@@ -255,7 +308,7 @@ class LibraryViewModel @Inject constructor(
     private data class TransientState(
         val isImporting: Boolean = false,
         val selection: Set<String> = emptySet(),
-        val hdrProgress: HdrMergeProgress? = null,
+        val compositeProgress: CompositeProgress? = null,
         val message: String? = null,
     )
 }
