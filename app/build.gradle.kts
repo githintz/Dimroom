@@ -95,6 +95,10 @@ android {
         warningsAsErrors = false
         abortOnError = true
         checkReleaseBuilds = false
+        // Analysing every dependency turns a two-minute lint into a twenty-minute one without
+        // saying anything useful about this codebase.
+        checkDependencies = false
+        checkGeneratedSources = false
         disable += setOf("MissingTranslation", "UnusedResources")
     }
 }

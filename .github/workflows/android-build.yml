@@ -19,6 +19,8 @@ jobs:
   build:
     name: Lint, test and build
     runs-on: ubuntu-latest
+    # A wedged Gradle daemon should fail the run, not sit on a runner for six hours.
+    timeout-minutes: 45
 
     steps:
       - name: Check out
@@ -33,11 +35,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          # Pushes populate the cache; pull requests only read it, so a PR can never poison the
+          # cache for the branch it targets. Read-only everywhere would leave every run cold.
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
 
-      - name: Lint
-        run: ./gradlew lintDebug --stacktrace
-
+      # Compile, test, package, then lint. Lint is by far the slowest step and the least
+      # informative when something is actually broken, so it runs last — a genuine breakage
+      # shows up in minutes instead of behind a full lint analysis.
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
@@ -50,6 +54,9 @@ jobs:
           name: dimroom-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Lint
+        run: ./gradlew lintDebug --stacktrace
 
       - name: Upload reports
         if: always()
