@@ -156,6 +156,14 @@ class PhotoRepository @Inject constructor(
         }
     }
 
+    /**
+     * Generates the grid thumbnail for an already-staged file.
+     *
+     * Exposed for [HdrRepository], which produces its photo bytes itself rather than importing them
+     * and still needs the same preview treatment as everything else in the library.
+     */
+    suspend fun writeThumbnailFor(source: File, photoId: String): String? = writeThumbnail(source, photoId)
+
     /** Decodes a downsampled copy for the grid and stores it under `/Previews`. */
     private suspend fun writeThumbnail(source: File, photoId: String): String? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -190,6 +198,11 @@ class PhotoRepository @Inject constructor(
 
     suspend fun deletePhoto(photoId: String) = withContext(ioDispatcher) {
         val entity = photoDao.findById(photoId) ?: return@withContext
+        // Deleting the tile that represents a stack must not bury the photos inside it, so release
+        // the group first and let the brackets return to the grid on their own.
+        if (entity.isStackPrimary) {
+            entity.stackId?.let { photoDao.dissolveStack(it) }
+        }
         storage.deletePhoto(entity.originalPath)
         entity.thumbnailPath?.let { storage.deletePhoto(it) }
         storage.deletePhoto(StorageProvider.sidecarPath(photoId))
@@ -266,6 +279,9 @@ class PhotoRepository @Inject constructor(
         dateAddedMs = dateAddedMs,
         dateTakenMs = dateTakenMs,
         hasEdits = hasEdits,
+        kind = kind,
+        stackId = stackId,
+        stackSize = stackSize,
     )
 
     private fun PhotoEntity.toPhoto(hasEdits: Boolean) = Photo(
@@ -279,6 +295,8 @@ class PhotoRepository @Inject constructor(
         dateAddedMs = dateAddedMs,
         dateTakenMs = dateTakenMs,
         hasEdits = hasEdits,
+        kind = kind,
+        stackId = stackId,
     )
 
     private fun queryDisplayName(uri: Uri): String? = runCatching {

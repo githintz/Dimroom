@@ -38,6 +38,7 @@ com.dimroom
 │   └── repository/        PhotoRepository, AlbumRepository, PresetRepository, SettingsRepository
 ├── editor/
 │   ├── gl/                Shader source, GlProgram, EditUniforms, preview + offscreen renderers
+│   ├── hdr/               Exposure fusion, MTB alignment, HdrMerger
 │   └── export/            ImageExporter (MediaStore + share sheet)
 ├── ui/                    Compose screens and view models (library, editor, settings)
 └── di/                    Hilt modules
@@ -71,6 +72,52 @@ both are GPU-cheap approximations of the desktop algorithms rather than reimplem
 **Known limitation:** the crop UI is slider-driven (aspect presets, size, position, straighten,
 rotate, flip) rather than direct-manipulation handles on the preview. The underlying crop model is a
 full normalised rect, so adding drag handles later is a UI change only.
+
+### HDR merge
+
+Select two or more photos in the library and merge them into a single image.
+
+**What the algorithm is.** Dimroom uses **Mertens–Kautz–Van Reeth exposure fusion**, not a
+Debevec-style radiance map with tone mapping. Each frame is scored per pixel for local contrast,
+colour saturation and well-exposedness; the scores are normalised across the bracket and the frames
+are blended band by band over a Laplacian pyramid. Blending per frequency band is what avoids the
+seams and halos a single-scale weighted average produces.
+
+That choice is deliberate. Radiance-map HDR needs trustworthy exposure times from EXIF and a
+recovered camera response curve, and it still has to be tone mapped back down to something you can
+look at. Fusion needs neither, copes with an uneven bracket, and outputs an ordinary displayable
+image — so a merged photo is a normal library photo that the existing edit, preset and export paths
+handle with no special cases.
+
+**Alignment.** Handheld brackets are never pixel-aligned. `MtbAligner` implements Ward's Median
+Threshold Bitmap: each frame is thresholded at its own median, which makes the comparison nearly
+immune to the exposure differences that define a bracket, then matched over a pyramid. It corrects
+translation only — rotation and parallax are out of scope, so a badly swung handheld set can still
+ghost. It can be switched off for tripod brackets.
+
+**Memory.** Fusion holds, per frame, an RGB float buffer and a weight map, plus a result pyramid and
+the pyramids of the frame currently being folded in. `HdrMerger` derives its working resolution from
+the device's own heap class, so a nine-shot bracket on a modest phone quietly merges at a lower
+resolution instead of dying. Frames are accumulated into the result pyramid one at a time rather
+than all being held at once. Up to 9 frames per merge.
+
+The maths lives in `ExposureFusion`, `Pyramids` and `MtbAligner`, which are pure Kotlin with no
+Android types — so pyramid reconstruction, weight normalisation, shadow/highlight recovery and
+alignment of a known translation are all covered by JVM unit tests rather than left to be eyeballed
+on a device.
+
+**What happens to the originals** is the user's choice at merge time:
+
+| Mode | Result in the library |
+| --- | --- |
+| Keep photos separate | The merge is added alongside the sources, which stay exactly where they are. |
+| Group as one HDR | The merge takes one tile and the sources are tucked inside it, badged `HDR n`. |
+
+Grouping is a *stack*: `PhotoEntity.stackId` plus one `isStackPrimary` member, and the library
+queries collapse non-primary members. Ungrouping is non-destructive and available from the selection
+bar; deleting a stack's primary releases its members rather than burying them. Like albums, stacking
+is library metadata held in Room — it deliberately does not alter the storage layout, so the folder
+contract above is unchanged and a merged photo is just another file under `/Originals`.
 
 ---
 
@@ -227,6 +274,9 @@ Without it, `assembleRelease` still succeeds and simply produces an unsigned APK
 **Library** — grid of imported photos with lazy thumbnails; import through the Android photo picker
 (no storage permission needed); sort by date added, date captured or name; albums with create,
 rename, delete and add/remove; long-press to multi-select.
+
+**HDR merge** — fuse 2–9 selected photos into one image, with optional alignment for handheld
+brackets; keep the originals separate or group them under the merge as a single tile.
 
 **Editor** — pinch-zoom and pan; before/after toggle and draggable split compare; Light, Color, HSL
 (8 bands), Effects and Crop panels; undo/redo and reset-to-original; edits autosave to Room and the

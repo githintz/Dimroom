@@ -4,8 +4,9 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.dimroom.domain.model.PhotoKind
 
-@Entity(tableName = "photos")
+@Entity(tableName = "photos", indices = [Index("stackId")])
 data class PhotoEntity(
     @PrimaryKey val id: String,
     val displayName: String,
@@ -17,6 +18,34 @@ data class PhotoEntity(
     val sizeBytes: Long,
     val dateAddedMs: Long,
     val dateTakenMs: Long,
+    /** How this photo came to exist: imported as-is, or produced by an HDR merge. */
+    val kind: PhotoKind = PhotoKind.ORIGINAL,
+    /**
+     * Groups a merged result with the brackets it came from. Null for a standalone photo.
+     * Exactly one member of a stack has [isStackPrimary] set, and only that one appears in the grid.
+     */
+    val stackId: String? = null,
+    val isStackPrimary: Boolean = false,
+)
+
+/** Provenance for a merged photo. Grouping is library metadata, like albums — it never leaves Room. */
+@Entity(
+    tableName = "hdr_merges",
+    foreignKeys = [
+        ForeignKey(
+            entity = PhotoEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["mergedPhotoId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+)
+data class HdrMergeEntity(
+    @PrimaryKey val mergedPhotoId: String,
+    /** Comma-separated source photo ids, oldest selection order first. */
+    val sourcePhotoIds: String,
+    val createdAtMs: Long,
+    val aligned: Boolean,
 )
 
 @Entity(tableName = "albums", indices = [Index(value = ["name"], unique = true)])

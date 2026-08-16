@@ -6,9 +6,10 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import com.dimroom.domain.model.PhotoKind
 import kotlinx.coroutines.flow.Flow
 
-/** A photo row joined with whether it carries a non-empty edit stack. */
+/** A photo row joined with whether it carries a non-empty edit stack and how big its stack is. */
 data class PhotoWithEditFlag(
     val id: String,
     val displayName: String,
@@ -20,6 +21,10 @@ data class PhotoWithEditFlag(
     val dateAddedMs: Long,
     val dateTakenMs: Long,
     val hasEdits: Boolean,
+    val kind: PhotoKind,
+    val stackId: String?,
+    /** Total photos in this row's stack, or 0 when it is not stacked. */
+    val stackSize: Int,
 )
 
 /** An album row with its live photo count and a cover thumbnail. */
@@ -53,16 +58,22 @@ interface PhotoDao {
     fun observeCount(): Flow<Int>
 
     /**
-     * The whole library. Sorting is applied in the repository rather than in SQL so that a single
-     * query serves every sort order and Room's invalidation stays simple.
+     * The whole library, one row per grid tile. Members of a stack collapse into their primary, so
+     * a merged HDR shows as a single photo with its brackets tucked inside.
+     *
+     * Sorting is applied in the repository rather than in SQL so that a single query serves every
+     * sort order and Room's invalidation stays simple.
      */
     @Query(
         """
         SELECT p.id, p.displayName, p.originalPath, p.thumbnailPath, p.width, p.height,
                p.sizeBytes, p.dateAddedMs, p.dateTakenMs,
-               (e.photoId IS NOT NULL) AS hasEdits
+               (e.photoId IS NOT NULL) AS hasEdits,
+               p.kind AS kind, p.stackId AS stackId,
+               (SELECT COUNT(*) FROM photos m WHERE m.stackId = p.stackId) AS stackSize
         FROM photos p
         LEFT JOIN edit_states e ON e.photoId = p.id
+        WHERE p.stackId IS NULL OR p.isStackPrimary = 1
         """,
     )
     fun observeAll(): Flow<List<PhotoWithEditFlag>>
@@ -71,17 +82,41 @@ interface PhotoDao {
         """
         SELECT p.id, p.displayName, p.originalPath, p.thumbnailPath, p.width, p.height,
                p.sizeBytes, p.dateAddedMs, p.dateTakenMs,
-               (e.photoId IS NOT NULL) AS hasEdits
+               (e.photoId IS NOT NULL) AS hasEdits,
+               p.kind AS kind, p.stackId AS stackId,
+               (SELECT COUNT(*) FROM photos m WHERE m.stackId = p.stackId) AS stackSize
         FROM photos p
         INNER JOIN album_photos ap ON ap.photoId = p.id
         LEFT JOIN edit_states e ON e.photoId = p.id
-        WHERE ap.albumId = :albumId
+        WHERE ap.albumId = :albumId AND (p.stackId IS NULL OR p.isStackPrimary = 1)
         """,
     )
     fun observeInAlbum(albumId: String): Flow<List<PhotoWithEditFlag>>
 
     @Query("SELECT albumId FROM album_photos WHERE photoId = :photoId")
     suspend fun albumIdsFor(photoId: String): List<String>
+
+    @Query("SELECT DISTINCT albumId FROM album_photos WHERE photoId IN (:photoIds)")
+    suspend fun albumIdsForAny(photoIds: List<String>): List<String>
+
+    @Query("SELECT * FROM photos WHERE id IN (:ids)")
+    suspend fun findAllById(ids: List<String>): List<PhotoEntity>
+
+    @Query("SELECT * FROM photos WHERE stackId = :stackId")
+    suspend fun findInStack(stackId: String): List<PhotoEntity>
+
+    /** Joins [photoIds] into [stackId]; [primaryId] becomes the tile that represents the group. */
+    @Query(
+        """
+        UPDATE photos SET stackId = :stackId, isStackPrimary = (id = :primaryId)
+        WHERE id IN (:photoIds)
+        """,
+    )
+    suspend fun assignStack(stackId: String, primaryId: String, photoIds: List<String>)
+
+    /** Releases every member of a stack back into the grid as a standalone photo. */
+    @Query("UPDATE photos SET stackId = NULL, isStackPrimary = 0 WHERE stackId = :stackId")
+    suspend fun dissolveStack(stackId: String)
 }
 
 @Dao
@@ -102,17 +137,20 @@ interface AlbumDao {
     @Query("DELETE FROM albums WHERE id = :id")
     suspend fun deleteById(id: String)
 
+    /** Counts and covers ignore stacked brackets, so an album's count matches the tiles on screen. */
     @Query(
         """
         SELECT a.id, a.name, a.createdAtMs,
-               COUNT(ap.photoId) AS photoCount,
+               (SELECT COUNT(*) FROM album_photos ap
+                    INNER JOIN photos p ON p.id = ap.photoId
+                    WHERE ap.albumId = a.id
+                      AND (p.stackId IS NULL OR p.isStackPrimary = 1)) AS photoCount,
                (SELECT p.thumbnailPath FROM album_photos ap2
                     INNER JOIN photos p ON p.id = ap2.photoId
                     WHERE ap2.albumId = a.id
+                      AND (p.stackId IS NULL OR p.isStackPrimary = 1)
                     ORDER BY ap2.addedAtMs DESC LIMIT 1) AS coverPhotoPath
         FROM albums a
-        LEFT JOIN album_photos ap ON ap.albumId = a.id
-        GROUP BY a.id
         ORDER BY a.createdAtMs DESC
         """,
     )
@@ -144,6 +182,16 @@ interface EditDao {
 
     @Query("DELETE FROM edit_states WHERE photoId = :photoId")
     suspend fun deleteById(photoId: String)
+}
+
+@Dao
+interface HdrDao {
+
+    @Upsert
+    suspend fun upsert(merge: HdrMergeEntity)
+
+    @Query("SELECT * FROM hdr_merges WHERE mergedPhotoId = :photoId")
+    suspend fun findByPhotoId(photoId: String): HdrMergeEntity?
 }
 
 @Dao

@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.HdrOn
+import androidx.compose.material.icons.filled.LayersClear
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
@@ -40,6 +42,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -66,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.dimroom.domain.model.Album
 import com.dimroom.domain.model.Photo
+import com.dimroom.domain.model.PhotoKind
 import com.dimroom.domain.model.SortOrder
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
@@ -82,6 +86,7 @@ fun LibraryScreen(
     var showAlbumMenu by remember { mutableStateOf(false) }
     var showAddToAlbumMenu by remember { mutableStateOf(false) }
     var albumDialog by remember { mutableStateOf<AlbumDialog?>(null) }
+    var showHdrDialog by remember { mutableStateOf(false) }
 
     // The system photo picker needs no storage permission and returns per-item read grants.
     val pickPhotos = rememberLauncherForActivityResult(
@@ -107,6 +112,19 @@ fun LibraryScreen(
                         }
                     },
                     actions = {
+                        // Merging needs a bracket, so the action only lights up for a workable
+                        // selection rather than failing after the user commits to it.
+                        IconButton(
+                            onClick = { showHdrDialog = true },
+                            enabled = state.canMergeSelection,
+                        ) {
+                            Icon(Icons.Filled.HdrOn, contentDescription = "Merge to HDR")
+                        }
+                        state.ungroupableStack?.let {
+                            IconButton(onClick = viewModel::ungroupSelectedStack) {
+                                Icon(Icons.Filled.LayersClear, contentDescription = "Ungroup HDR")
+                            }
+                        }
                         Box {
                             IconButton(onClick = { showAddToAlbumMenu = true }) {
                                 Icon(Icons.Filled.LibraryAdd, contentDescription = "Add to album")
@@ -251,6 +269,21 @@ fun LibraryScreen(
                 }
             }
 
+            // Fusion takes real time on a big bracket, so report the actual stage and fraction
+            // rather than an indefinite spinner.
+            state.hdrProgress?.let { progress ->
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text(
+                        text = "${progress.stage}…",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    LinearProgressIndicator(
+                        progress = { progress.fraction.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
+                }
+            }
+
             when {
                 state.photos.isEmpty() && !state.isImporting -> EmptyLibrary(
                     inAlbum = state.selectedAlbumId != null,
@@ -266,6 +299,17 @@ fun LibraryScreen(
                 )
             }
         }
+    }
+
+    if (showHdrDialog) {
+        HdrMergeDialog(
+            photoCount = state.selection.size,
+            onDismiss = { showHdrDialog = false },
+            onConfirm = { name, mode, alignFrames ->
+                viewModel.mergeSelectionToHdr(name, mode, alignFrames)
+                showHdrDialog = false
+            },
+        )
     }
 
     albumDialog?.let { dialog ->
@@ -367,6 +411,14 @@ private fun PhotoGrid(
                     )
                 }
 
+                // A merged photo is labelled; a grouped one also says how many photos it stands for.
+                if (photo.kind == PhotoKind.HDR_MERGE || photo.isStack) {
+                    TileBadge(
+                        text = if (photo.isStack) "HDR ${photo.stackSize}" else "HDR",
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
+                    )
+                }
+
                 if (selected) {
                     Box(
                         modifier = Modifier
@@ -386,6 +438,20 @@ private fun PhotoGrid(
             }
         }
     }
+}
+
+/** Small dark pill used for tile annotations, legible over any photo. */
+@Composable
+private fun TileBadge(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = Color.White,
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+    )
 }
 
 @Composable

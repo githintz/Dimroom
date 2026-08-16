@@ -14,9 +14,15 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!--
+        HDR merge holds several full-resolution frames plus their pyramids in memory at once.
+        HdrMerger sizes its working resolution from the heap it is actually given, so this raises
+        the ceiling rather than being relied on to avoid an OOM.
+    -->
     <application
         android:name=".DimroomApplication"
         android:allowBackup="true"
+        android:largeHeap="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
