@@ -137,10 +137,12 @@ class PanoramaGeometryTest {
 
         val weights = PanoramaBlender.edgeDistanceWeights(coverage)
 
+        // A frame covering the whole canvas still has to taper: its own border is a seam, even
+        // though no pixel of the mask is uncovered.
         val centre = weights[20, 20, 0]
         val edge = weights[0, 20, 0]
-        assertTrue("Centre should outweigh the edge: $centre vs $edge", centre > edge)
-        assertEquals(0f, edge, 1e-4f)
+        assertTrue("Centre should outweigh the edge: $centre vs $edge", centre > edge * 5f)
+        assertEquals("Border should sit one step from the outside", 1f, edge, 1e-4f)
     }
 
     @Test

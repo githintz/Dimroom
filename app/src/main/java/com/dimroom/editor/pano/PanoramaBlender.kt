@@ -74,6 +74,12 @@ object PanoramaBlender {
         val distance = FloatImage(width, height, 1)
         val large = (width + height).toFloat()
 
+        // Everything outside the buffer counts as uncovered, so a neighbour off the edge is at
+        // distance zero. Without that, a mask covering the whole canvas has no seeds anywhere and
+        // every pixel keeps its initial value — a flat weight map, and no blend at all.
+        fun neighbour(inBounds: Boolean, index: Int): Float =
+            if (inBounds) distance.data[index] + 1f else 1f
+
         // Two-pass chamfer transform: forward sweep then backward.
         for (y in 0 until height) {
             for (x in 0 until width) {
@@ -83,8 +89,8 @@ object PanoramaBlender {
                     continue
                 }
                 var best = large
-                if (x > 0) best = min(best, distance.data[index - 1] + 1f)
-                if (y > 0) best = min(best, distance.data[index - width] + 1f)
+                best = min(best, neighbour(x > 0, index - 1))
+                best = min(best, neighbour(y > 0, index - width))
                 distance.data[index] = best
             }
         }
@@ -93,8 +99,8 @@ object PanoramaBlender {
                 val index = y * width + x
                 if (coverage.data[index] < 0.5f) continue
                 var best = distance.data[index]
-                if (x < width - 1) best = min(best, distance.data[index + 1] + 1f)
-                if (y < height - 1) best = min(best, distance.data[index + width] + 1f)
+                best = min(best, neighbour(x < width - 1, index + 1))
+                best = min(best, neighbour(y < height - 1, index + width))
                 distance.data[index] = best
             }
         }

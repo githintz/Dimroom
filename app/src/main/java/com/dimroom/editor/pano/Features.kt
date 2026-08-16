@@ -46,6 +46,14 @@ object FeatureDetector {
     /** Contiguous ring pixels that must all be brighter or all darker to call it a corner. */
     private const val ARC_LENGTH = 9
 
+    /**
+     * Compass points that must agree before the full ring is read.
+     *
+     * Derived from [ARC_LENGTH], not chosen: with the four points spaced evenly around a sixteen
+     * pixel ring, an arc of [ARC_LENGTH] contains at least `ARC_LENGTH / 4` of them.
+     */
+    private const val MIN_COMPASS_AGREEMENT = ARC_LENGTH / 4
+
     private const val PATCH_RADIUS = 15
     private const val DESCRIPTOR_BITS = 256
 
@@ -95,15 +103,19 @@ object FeatureDetector {
         val bright = centre + threshold
         val dark = centre - threshold
 
-        // Cheap rejection first: opposite pairs of the ring must straddle the threshold, which
-        // discards the overwhelming majority of pixels before the full ring is read.
+        // Cheap rejection first, using only the four compass points, which discards the
+        // overwhelming majority of pixels before the full ring is read.
+        //
+        // Two of four, not three: the compass points sit four apart on a sixteen-pixel ring, so a
+        // window of nine consecutive positions is only guaranteed to contain two of them. Demanding
+        // three is the FAST-12 test and rejects the great majority of real FAST-9 corners.
         val north = image.at(x, y - 3)
         val south = image.at(x, y + 3)
         val east = image.at(x + 3, y)
         val west = image.at(x - 3, y)
         val brightCount = countIf(north > bright, south > bright, east > bright, west > bright)
         val darkCount = countIf(north < dark, south < dark, east < dark, west < dark)
-        if (brightCount < 3 && darkCount < 3) return 0
+        if (brightCount < MIN_COMPASS_AGREEMENT && darkCount < MIN_COMPASS_AGREEMENT) return 0
 
         val ring = IntArray(16) { image.at(x + CIRCLE_X[it], y + CIRCLE_Y[it]) }
         if (!hasArc(ring, bright, brighter = true) && !hasArc(ring, dark, brighter = false)) return 0
