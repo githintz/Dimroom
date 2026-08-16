@@ -35,10 +35,20 @@ object MtbAligner {
      * Finds the shift that best maps [target] onto [reference], returning the offset to apply to
      * [target].
      *
-     * [maxShiftBits] bounds how deep the pyramid goes, but the image size bounds it too: halving
-     * stops once a level would fall below a usable size. Reach is therefore roughly
-     * `4 * 2^levels`, where `levels` is whichever of the two limits binds first — about +/-64 px on
-     * a 256 px image and considerably more on a full-resolution frame.
+     * ### Reach
+     * Recoverable shift is `2^(h+1) - 1` pixels, where `h` is the number of halvings — bounded by
+     * [maxShiftBits] and, in practice more often, by the image size, since halving stops at 32 px.
+     * So reach scales with the frame:
+     *
+     * | Frame | Halvings | Reach |
+     * | --- | --- | --- |
+     * | 256 px | 3 | +/-15 px |
+     * | 512 px | 4 | +/-31 px |
+     * | 2048 px | 6 | +/-127 px |
+     *
+     * [HdrMerger] aligns at its working resolution, typically one to two thousand pixels, so this
+     * comfortably covers realistic handheld drift of a few percent of the frame. A shift beyond
+     * reach is not detected as a failure — it simply returns the best offset it could walk to.
      */
     fun align(reference: GrayImage, target: GrayImage, maxShiftBits: Int = 6): Offset {
         require(reference.width == target.width && reference.height == target.height) {
@@ -49,15 +59,17 @@ object MtbAligner {
     }
 
     private fun alignRecursive(reference: GrayImage, target: GrayImage, level: Int): Offset {
-        // Recurse first: solving the coarse image gives a starting point the finer level only has
-        // to nudge by a pixel. The bottom of the recursion has no such hint, so it searches a wider
-        // radius — that one wide search is what sets how far a shift can be recovered at all.
+        // Recurse first: solving the coarse image gives a starting point that this level only has
+        // to nudge by a pixel, which is what keeps the search to nine candidates per level.
+        //
+        // Reach comes from depth, not from a wider search. Widening the search at the bottom is
+        // tempting and does not work: the coarsest bitmap has the fewest pixels and the most
+        // exclusions, so extra candidates there mostly buy spurious matches that the single-pixel
+        // refinements above can no longer walk back.
         var current = Offset(0, 0)
-        var radius = COARSE_SEARCH_RADIUS
         if (level > 0 && reference.width > MIN_SIZE && reference.height > MIN_SIZE) {
             val coarse = alignRecursive(halve(reference), halve(target), level - 1)
             current = Offset(coarse.dx * 2, coarse.dy * 2)
-            radius = REFINE_SEARCH_RADIUS
         }
 
         val referenceBitmap = thresholdAtMedian(reference)
@@ -65,8 +77,8 @@ object MtbAligner {
 
         var best = current
         var bestError = Int.MAX_VALUE
-        for (dy in -radius..radius) {
-            for (dx in -radius..radius) {
+        for (dy in -SEARCH_RADIUS..SEARCH_RADIUS) {
+            for (dx in -SEARCH_RADIUS..SEARCH_RADIUS) {
                 val candidate = Offset(current.dx + dx, current.dy + dy)
                 val error = disagreement(referenceBitmap, targetBitmap, candidate)
                 if (error < bestError) {
@@ -157,13 +169,11 @@ object MtbAligner {
 
     /**
      * Floor on the coarsest pyramid level. Below roughly this size the median threshold stops
-     * describing anything structural and the match becomes a coin toss.
+     * describing anything structural and the match becomes a coin toss, which then poisons every
+     * refinement above it.
      */
-    private const val MIN_SIZE = 16
+    private const val MIN_SIZE = 32
 
-    /** Radius of the one unguided search, at the bottom of the recursion. */
-    private const val COARSE_SEARCH_RADIUS = 4
-
-    /** Every finer level only refines what the level below already found. */
-    private const val REFINE_SEARCH_RADIUS = 1
+    /** One pixel at every level: the level below has already done the locating. */
+    private const val SEARCH_RADIUS = 1
 }

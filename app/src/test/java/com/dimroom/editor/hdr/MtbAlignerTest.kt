@@ -48,16 +48,31 @@ class MtbAlignerTest {
     }
 
     @Test
-    fun `recovers shifts far beyond a single pyramid step`() {
-        // Well past what the finest levels can nudge, so this only succeeds if the coarse search
-        // finds the shift and every finer level refines it correctly.
-        val reference = texture(width = 256, height = 256)
-        val shifted = shift(reference, dx = 21, dy = -17)
+    fun `recovers a realistic handheld drift across the whole pyramid`() {
+        // ~3.5% of the frame, which is the scale of drift a handheld bracket actually shows, and
+        // an order of magnitude more than the single-pixel refinements can move on their own: this
+        // only passes if every level of the pyramid converges correctly.
+        val reference = texture(width = 512, height = 512)
+        val shifted = shift(reference, dx = 18, dy = -13)
 
-        val offset = MtbAligner.align(reference, shifted, maxShiftBits = 6)
+        val offset = MtbAligner.align(reference, shifted)
 
-        assertEquals(-21, offset.dx)
-        assertEquals(17, offset.dy)
+        assertEquals(-18, offset.dx)
+        assertEquals(13, offset.dy)
+    }
+
+    @Test
+    fun `reach grows with the frame rather than being unlimited`() {
+        // Documents the real limit rather than pretending there isn't one. Halving stops at 32 px,
+        // so a small frame simply cannot walk to a large shift — which is fine, because alignment
+        // runs at the merge working resolution, not on thumbnails.
+        val small = texture(width = 128, height = 128)
+        val farShift = shift(small, dx = 40, dy = 0)
+
+        val offset = MtbAligner.align(small, farShift)
+
+        // 128 px allows two halvings, so reach is 7 px; the result saturates well short of 40.
+        assertTrue("Expected reach to be bounded, got $offset", abs(offset.dx) <= 7)
     }
 
     @Test

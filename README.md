@@ -91,10 +91,18 @@ handle with no special cases.
 
 **Alignment.** Handheld brackets are never pixel-aligned. `MtbAligner` implements Ward's Median
 Threshold Bitmap: each frame is thresholded at its own median, which makes the comparison nearly
-immune to the exposure differences that define a bracket, then matched over a pyramid — one wide
-search at the coarsest level, refined by a pixel at each finer one. It corrects translation only —
-rotation and parallax are out of scope, so a badly swung handheld set can still ghost. It can be
-switched off for tripod brackets.
+immune to the exposure differences that define a bracket, then matched over a pyramid — a
+nine-candidate search at each level, each one refining the level below.
+
+Its reach is `2^(halvings+1) - 1` px, and halvings stop at a 32 px floor, so reach scales with the
+frame: ±31 px at 512 px, ±127 px at 2048 px. Since alignment runs at the merge working resolution
+that covers realistic handheld drift of a few percent of the frame. Reach deliberately comes from
+depth rather than from a wider search — widening the search at the coarsest level makes it *worse*,
+because that bitmap has the fewest pixels and the most exclusions, so extra candidates mostly buy
+spurious matches the single-pixel refinements can no longer walk back.
+
+It corrects translation only — rotation and parallax are out of scope, so a badly swung handheld set
+can still ghost. It can be switched off for tripod brackets.
 
 **A note on the weights.** The quality terms are floored individually before being multiplied, not
 after. A monochrome bracket has a saturation term of exactly zero in every frame, and a bare product
